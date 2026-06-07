@@ -48,3 +48,8 @@ data_list/
 tmp_teacher_test_input/
 train/
 
+
+# local symlink
+train
+train/
+
