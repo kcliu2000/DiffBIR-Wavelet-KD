@@ -16,3 +16,35 @@ __pycache__
 /runs
 /tests
 /meta_files
+
+# ===== User experiment files =====
+weights/
+datasets/
+results/
+experiments/
+wandb/
+logs/
+*.log
+
+# checkpoints / large model files
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+
+# generated lists / debug files
+data_list/debug_check/
+logs_teacher_diffbir_v2.txt
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# vscode
+.vscode/
+
+data_list/
+tmp_teacher_test_input/
+train/
+

@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Tuple
 
 import torch
@@ -27,12 +26,15 @@ def make_beta_schedule(
 
     elif schedule == "sqrt_linear":
         betas = np.linspace(linear_start, linear_end, n_timestep, dtype=np.float64)
+
     elif schedule == "sqrt":
         betas = (
             np.linspace(linear_start, linear_end, n_timestep, dtype=np.float64) ** 0.5
         )
+
     else:
         raise ValueError(f"schedule '{schedule}' unknown.")
+
     return betas
 
 
@@ -44,26 +46,19 @@ def extract_into_tensor(
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 
-# Copy from: https://github.com/Max-We/sf-zero-signal-to-noise/blob/main/common_diffusion_noise_schedulers_are_flawed.ipynb
-# Original paper: https://arxiv.org/abs/2305.08891
 def enforce_zero_terminal_snr(betas: np.ndarray) -> np.ndarray:
     betas = torch.from_numpy(betas)
-    # Convert betas to alphas_bar_sqrt
+
     alphas = 1 - betas
     alphas_bar = alphas.cumprod(0)
     alphas_bar_sqrt = alphas_bar.sqrt()
 
-    # Store old values.
     alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
     alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
 
-    # Shift so the last timestep is zero.
     alphas_bar_sqrt -= alphas_bar_sqrt_T
-
-    # Scale so the first timestep is back to the old value.
     alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
 
-    # Convert alphas_bar_sqrt to betas
     alphas_bar = alphas_bar_sqrt**2
     alphas = alphas_bar[1:] / alphas_bar[:-1]
     alphas = torch.cat([alphas_bar[0:1], alphas])
@@ -73,7 +68,6 @@ def enforce_zero_terminal_snr(betas: np.ndarray) -> np.ndarray:
 
 
 class Diffusion(nn.Module):
-
     def __init__(
         self,
         timesteps=1000,
@@ -83,19 +77,22 @@ class Diffusion(nn.Module):
         linear_end=2e-2,
         cosine_s=8e-3,
         parameterization="eps",
-        zero_snr=False
+        zero_snr=False,
     ):
         super().__init__()
+
         self.num_timesteps = timesteps
         self.beta_schedule = beta_schedule
         self.linear_start = linear_start
         self.linear_end = linear_end
         self.cosine_s = cosine_s
+
         assert parameterization in [
             "eps",
             "x0",
             "v",
-        ], "currently only supporting 'eps' and 'x0' and 'v'"
+        ], "currently only supporting 'eps', 'x0', and 'v'"
+
         self.parameterization = parameterization
         self.zero_snr = zero_snr
         self.loss_type = loss_type
@@ -107,10 +104,13 @@ class Diffusion(nn.Module):
             linear_end=linear_end,
             cosine_s=cosine_s,
         )
+
         if zero_snr:
             betas = enforce_zero_terminal_snr(betas)
+
         alphas = 1.0 - betas
         alphas_cumprod = np.cumprod(alphas, axis=0)
+
         sqrt_alphas_cumprod = np.sqrt(alphas_cumprod)
         sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - alphas_cumprod)
 
@@ -134,18 +134,33 @@ class Diffusion(nn.Module):
             - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x.shape) * x
         )
 
+    def predict_start_from_noise(self, x_t, t, noise):
+        return (
+            x_t
+            - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape)
+            * noise
+        ) / extract_into_tensor(self.sqrt_alphas_cumprod, t, x_t.shape)
+
+    def predict_start_from_v(self, x_t, t, v):
+        return (
+            extract_into_tensor(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t
+            - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
+        )
+
     def get_loss(self, pred, target, mean=True):
         if self.loss_type == "l1":
             loss = (target - pred).abs()
             if mean:
                 loss = loss.mean()
+
         elif self.loss_type == "l2":
             if mean:
                 loss = torch.nn.functional.mse_loss(target, pred)
             else:
                 loss = torch.nn.functional.mse_loss(target, pred, reduction="none")
+
         else:
-            raise NotImplementedError("unknown loss type '{loss_type}'")
+            raise NotImplementedError(f"unknown loss type '{self.loss_type}'")
 
         return loss
 
@@ -156,12 +171,50 @@ class Diffusion(nn.Module):
 
         if self.parameterization == "x0":
             target = x_start
+
         elif self.parameterization == "eps":
             target = noise
+
         elif self.parameterization == "v":
             target = self.get_v(x_start, noise, t)
+
         else:
             raise NotImplementedError()
 
         loss_simple = self.get_loss(model_output, target, mean=False).mean()
         return loss_simple
+
+    def p_losses_with_x0(self, model, x_start, t, cond):
+        """
+        DiffBIR KD training 用：
+        回傳原本 diffusion loss 與 student predicted x0 latent。
+        """
+        noise = torch.randn_like(x_start)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        model_output = model(x_noisy, t, cond)
+
+        if self.parameterization == "x0":
+            target = x_start
+            pred_x0 = model_output
+
+        elif self.parameterization == "eps":
+            target = noise
+            pred_x0 = self.predict_start_from_noise(
+                x_t=x_noisy,
+                t=t,
+                noise=model_output,
+            )
+
+        elif self.parameterization == "v":
+            target = self.get_v(x_start, noise, t)
+            pred_x0 = self.predict_start_from_v(
+                x_t=x_noisy,
+                t=t,
+                v=model_output,
+            )
+
+        else:
+            raise NotImplementedError()
+
+        loss_simple = self.get_loss(model_output, target, mean=False).mean()
+        return loss_simple, pred_x0
