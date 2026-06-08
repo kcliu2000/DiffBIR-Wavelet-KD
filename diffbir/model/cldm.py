@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from .controlnet import ControlledUnetModel, ControlNet
+from .lite_controlnet import LiteControlNet
 from .vae import AutoencoderKL
 from .util import GroupNorm32
 from .clip import FrozenOpenCLIPEmbedder
@@ -26,7 +27,15 @@ class ControlLDM(nn.Module):
         self.unet = ControlledUnetModel(**unet_cfg)
         self.vae = AutoencoderKL(**vae_cfg)
         self.clip = FrozenOpenCLIPEmbedder(**clip_cfg)
-        self.controlnet = ControlNet(**controlnet_cfg)
+        controlnet_cfg = dict(controlnet_cfg)
+        controlnet_type = controlnet_cfg.pop("type", "full")
+
+        if controlnet_type == "lite":
+            self.controlnet = LiteControlNet(**controlnet_cfg)
+        elif controlnet_type == "full":
+            self.controlnet = ControlNet(**controlnet_cfg)
+        else:
+            raise ValueError(f"Unknown controlnet type: {controlnet_type}")
         self.scale_factor = latent_scale_factor
         self.control_scales = [1.0] * 13
 
@@ -181,14 +190,22 @@ class ControlLDM(nn.Module):
             self.unet.output_blocks,
         ]:
             module.type(dtype)
-        # convert controlnet blocks and zero-convs to dtype
-        for module in [
-            self.controlnet.input_blocks,
-            self.controlnet.zero_convs,
-            self.controlnet.middle_block,
-            self.controlnet.middle_block_out,
-        ]:
-            module.type(dtype)
+        # convert controlnet blocks to dtype
+        # Official ControlNet has input_blocks / zero_convs / middle_block / middle_block_out.
+        # LiteControlNet does not follow that exact attribute layout, so we cast the whole module.
+        if all(
+            hasattr(self.controlnet, name)
+            for name in ["input_blocks", "zero_convs", "middle_block", "middle_block_out"]
+        ):
+            for module in [
+                self.controlnet.input_blocks,
+                self.controlnet.zero_convs,
+                self.controlnet.middle_block,
+                self.controlnet.middle_block_out,
+            ]:
+                module.type(dtype)
+        else:
+            self.controlnet.type(dtype)
 
         def cast_groupnorm_32(m):
             if isinstance(m, GroupNorm32):
@@ -201,10 +218,16 @@ class ControlLDM(nn.Module):
             self.unet.output_blocks,
         ]:
             module.apply(cast_groupnorm_32)
-        for module in [
-            self.controlnet.input_blocks,
-            self.controlnet.zero_convs,
-            self.controlnet.middle_block,
-            self.controlnet.middle_block_out,
-        ]:
-            module.apply(cast_groupnorm_32)
+        if all(
+            hasattr(self.controlnet, name)
+            for name in ["input_blocks", "zero_convs", "middle_block", "middle_block_out"]
+        ):
+            for module in [
+                self.controlnet.input_blocks,
+                self.controlnet.zero_convs,
+                self.controlnet.middle_block,
+                self.controlnet.middle_block_out,
+            ]:
+                module.apply(cast_groupnorm_32)
+        else:
+            self.controlnet.apply(cast_groupnorm_32)
