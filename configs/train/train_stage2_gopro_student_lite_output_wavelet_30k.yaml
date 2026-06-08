@@ -121,6 +121,7 @@ train:
   ckpt_every: 5000
   image_every: 999999999
   enable_image_log: false
+  skip_cleaner: true
 
   noise_aug_timestep: 0
 
