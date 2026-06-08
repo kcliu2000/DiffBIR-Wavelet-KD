@@ -53,3 +53,9 @@ train/
 train
 train/
 
+
+# ===== Keep training configs trackable =====
+!configs/
+!configs/train/
+!configs/train/*.yaml
+!configs/train/*.yml
