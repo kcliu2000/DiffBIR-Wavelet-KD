@@ -66,3 +66,15 @@ tmp_eval_input_50/
 tmp_eval_input_rand100/
 tmp_teacher_test_input_5/
 tmp_teacher_test_input_50/
+tmp_remaining_gopro_lite_output_30k/
+# Logs
+logs_*.txt
+nohup.out
+
+# Training / inference outputs
+experiments/
+results/
+wandb/
+*.pt
+*.pth
+*.ckpt
