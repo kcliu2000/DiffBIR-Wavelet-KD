@@ -67,6 +67,8 @@ tmp_eval_input_rand100/
 tmp_teacher_test_input_5/
 tmp_teacher_test_input_50/
 tmp_remaining_gopro_lite_output_30k/
+tmp_gopro_train_condition_nafnet_wkd_2103/
+
 # Logs
 logs_*.txt
 nohup.out
