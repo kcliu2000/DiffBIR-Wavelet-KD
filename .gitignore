@@ -26,6 +26,7 @@ wandb/
 logs/
 *.log
 
+
 # checkpoints / large model files
 *.ckpt
 *.pth
@@ -59,3 +60,9 @@ train/
 !configs/train/
 !configs/train/*.yaml
 !configs/train/*.yml
+
+# tmp test image
+tmp_eval_input_50/
+tmp_eval_input_rand100/
+tmp_teacher_test_input_5/
+tmp_teacher_test_input_50/
